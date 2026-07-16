@@ -12,10 +12,10 @@ Terminal-first small local Python agent built around [`HuggingFaceTB/SmolLM3-3B`
 
 ## Requirements
 
-- Python `>=3.11,<3.14`
-- Python 3.12 is recommended
 - NVIDIA GPU with CUDA-enabled PyTorch (Optional)
 - Docker if you want to run SearXNG locally (Optional)
+- Python 3.12 is recommended
+- Python `>=3.11,<3.14`
 - [`uv`](https://docs.astral.sh/uv/)
 
 CPU mode works, but SmolLM3-3B is much faster with CUDA.
