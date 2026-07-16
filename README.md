@@ -1,8 +1,6 @@
 # LocalMind
 
-A small local agent for everyday reasoning.
-
-Terminal-first Python agent built around [`HuggingFaceTB/SmolLM3-3B`](https://huggingface.co/HuggingFaceTB/SmolLM3-3B).
+Terminal-first small local Python agent built around [`HuggingFaceTB/SmolLM3-3B`](https://huggingface.co/HuggingFaceTB/SmolLM3-3B).
 
 ## Features
 
