@@ -95,3 +95,7 @@ uv pip install --reinstall torch torchvision torchaudio --index-url https://down
 ## License
 
 LocalMind is licensed under the Apache License 2.0. See [`LICENSE`](LICENSE).
+
+## Author
+
+Ville Pakarinen (@vpakarinen2)
