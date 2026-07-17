@@ -27,7 +27,7 @@ uv sync
 
 ## Usage
 
-Start a chat session:
+Start chat session:
 
 ```powershell
 uv run localmind chat --workspace ./workspace
@@ -46,7 +46,7 @@ Useful chat commands:
 
 ## Web Search
 
-LocalMind can use web search through SearXNG:
+LocalMind use web search through SearXNG:
 
 ```powershell
 uv run localmind chat --workspace ./workspace --search --searxng-url http://localhost:8080
@@ -60,15 +60,32 @@ From the project root, start SearXNG:
 docker run --rm -d --name localmind-searxng -p 8080:8080 --mount type=bind,source="%cd%\searxng",target=/etc/searxng -e BASE_URL=http://localhost:8080/ searxng/searxng:latest
 ```
 
+## SearXNG Settings
+
+```
+use_default_settings: true
+
+server:
+  secret_key: "<secret_key_here>"
+  image_proxy: true
+  bind_address: "0.0.0.0"
+  port: 8080
+
+search:
+  formats:
+    - html
+    - json
+```
+
 ## CUDA Setup
 
-Check the installed PyTorch build:
+Check the installed PyTorch:
 
 ```powershell
 uv run python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 ```
 
-Install CUDA-enabled PyTorch wheel:
+Install CUDA-enabled PyTorch:
 
 ```powershell
 uv pip install --reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
