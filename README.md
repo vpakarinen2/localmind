@@ -54,24 +54,7 @@ uv run localmind chat --workspace ./workspace --search --searxng-url http://loca
 
 ### Run SearXNG Locally
 
-Minimal config file at
-`searxng/settings.yml` with JSON output enabled.
-
 From the project root, start SearXNG:
-
-```powershell
-docker stop localmind-searxng
-docker rm localmind-searxng
-
-docker run --rm -d `
-  --name localmind-searxng `
-  -p 8080:8080 `
-  --mount type=bind,source="${PWD}\searxng",target=/etc/searxng `
-  -e BASE_URL=http://localhost:8080/ `
-  searxng/searxng:latest
-```
-
-If you use `cmd`, use `%cd%` instead of `${PWD}`:
 
 ```cmd
 docker run --rm -d --name localmind-searxng -p 8080:8080 --mount type=bind,source="%cd%\searxng",target=/etc/searxng -e BASE_URL=http://localhost:8080/ searxng/searxng:latest
