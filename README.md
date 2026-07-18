@@ -17,6 +17,21 @@ A small local Python CLI agent built around [`HuggingFaceTB/SmolLM3-3B`](https:/
 - Python 3.12 is recommended
 - [`uv`](https://docs.astral.sh/uv/)
 
+## Example
+
+```
+you: Who was the US senator who died recently? Use a web search.
+Model setup
+Requested device: auto
+Resolved device: auto -> cuda (NVIDIA GeForce RTX 4060 Laptop GPU)
+Model: HuggingFaceTB/SmolLM3-3B
+Loading model weights...
+Model ready.
+
+LocalMind
+U.S. Senator Lindsey Graham, a close ally of President Donald Trump, has died at the age of 71 after a brief and sudden illness, according to his office. He was a Republican from South Carolina.
+```
+
 CPU mode works, but SmolLM3-3B is much faster with CUDA.
 
 ## Installation
