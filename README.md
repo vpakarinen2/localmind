@@ -32,8 +32,6 @@ LocalMind
 U.S. Senator Lindsey Graham, a close ally of President Donald Trump, has died at the age of 71 after a brief and sudden illness, according to his office. He was a Republican from South Carolina.
 ```
 
-CPU mode works, but SmolLM3-3B is much faster with CUDA.
-
 ## Installation
 
 ```powershell
@@ -51,17 +49,22 @@ uv run localmind chat --workspace ./workspace
 Use CUDA when available:
 
 ```powershell
-uv run localmind chat --workspace ./workspace --device auto
+uv run localmind chat --workspace ./workspace --device cuda
 ```
 
-Useful chat commands:
+## Workspace
 
-- `/help`
-- `/exit`
+Workspace is a local working directory that defaults to `./workspace`. 
+
+You can optionally change it with `--workspace`:
+
+```
+uv run localmind chat --workspace .\workspace\my-session
+```
 
 ## Web Search
 
-LocalMind use web search through SearXNG:
+LocalMind uses web search through SearXNG:
 
 ```powershell
 uv run localmind chat --workspace ./workspace --search --searxng-url http://localhost:8080
