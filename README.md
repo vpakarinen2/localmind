@@ -5,6 +5,7 @@ A small local Python CLI agent built around [`HuggingFaceTB/SmolLM3-3B`](https:/
 ## Features
 
 - Local chat with SmolLM3-3B through Hugging Face Transformers
+- Workspace that keeps local activity within selected directory
 - Built-in tools (calculator, local date and time, file read/write)
 - Device selection with `auto`, `cpu`, and `cuda` modes
 - Optional web search through self-hosted SearXNG
