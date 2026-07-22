@@ -7,7 +7,6 @@ import ast
 from dataclasses import dataclass
 from typing import Any, Callable
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from localmind.search import SearxngSearch
@@ -36,6 +35,11 @@ class WorkspaceViolation(ValueError):
 
 
 class SafeCalculator:
+    _max_expression_length = 500
+    _max_ast_nodes = 100
+    _max_integer_bits = 4_096
+    _max_float_magnitude = 1e100
+    _max_exponent = 1_000
     _binary_ops = {
         ast.Add: operator.add,
         ast.Sub: operator.sub,
@@ -68,7 +72,11 @@ class SafeCalculator:
     }
 
     def calculate(self, expression: str) -> str:
+        if len(expression) > self._max_expression_length:
+            raise ValueError("Expression is too long")
         tree = ast.parse(expression, mode="eval")
+        if sum(1 for _ in ast.walk(tree)) > self._max_ast_nodes:
+            raise ValueError("Expression is too complex")
         value = self._eval(tree.body)
         if isinstance(value, float):
             return format(value, ".12g")
@@ -76,17 +84,21 @@ class SafeCalculator:
 
     def _eval(self, node: ast.AST) -> int | float:
         if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-            return node.value
+            return self._validate_value(node.value)
         if isinstance(node, ast.BinOp):
             op_type = type(node.op)
             if op_type not in self._binary_ops:
                 raise ValueError("Operator is not allowed")
-            return self._binary_ops[op_type](self._eval(node.left), self._eval(node.right))
+            left = self._eval(node.left)
+            right = self._eval(node.right)
+            if op_type is ast.Pow and abs(right) > self._max_exponent:
+                raise ValueError("Exponent is too large")
+            return self._validate_value(self._binary_ops[op_type](left, right))
         if isinstance(node, ast.UnaryOp):
             op_type = type(node.op)
             if op_type not in self._unary_ops:
                 raise ValueError("Operator is not allowed")
-            return self._unary_ops[op_type](self._eval(node.operand))
+            return self._validate_value(self._unary_ops[op_type](self._eval(node.operand)))
         if isinstance(node, ast.Name):
             if node.id not in self._names:
                 raise ValueError(f"Name is not allowed: {node.id}")
@@ -97,8 +109,19 @@ class SafeCalculator:
             if node.keywords:
                 raise ValueError("Keyword arguments are not allowed")
             args = [self._eval(arg) for arg in node.args]
-            return self._functions[node.func.id](*args)
+            return self._validate_value(self._functions[node.func.id](*args))
         raise ValueError("Expression is not allowed")
+
+    def _validate_value(self, value: int | float) -> int | float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("Only real numeric values are allowed")
+        if isinstance(value, int) and value.bit_length() > self._max_integer_bits:
+            raise ValueError("Integer result is too large")
+        if isinstance(value, float) and (
+            not math.isfinite(value) or abs(value) > self._max_float_magnitude
+        ):
+            raise ValueError("Floating-point result is too large")
+        return value
 
 
 class WorkspaceFiles:
@@ -200,7 +223,7 @@ class ToolRegistry:
                         "max_results": {
                             "type": "integer",
                             "description": "Maximum results to return, from 1 to 10.",
-                            "default": 5,
+                            "default": 10,
                         },
                     },
                     "required": ["query"],
@@ -222,9 +245,5 @@ class ToolRegistry:
 
 
 def current_time() -> str:
-    try:
-        tz = ZoneInfo("Europe/Helsinki")
-        now = datetime.now(tz)
-    except Exception:
-        now = datetime.now().astimezone()
+    now = datetime.now().astimezone()
     return now.isoformat(timespec="seconds")
