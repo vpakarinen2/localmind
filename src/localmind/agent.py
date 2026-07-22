@@ -4,40 +4,37 @@ import json
 
 from typing import Any
 
-from localmind.tool_parser import parse_tool_calls, strip_tool_calls
 from localmind.config import LocalMindConfig
 from localmind.tools import ToolRegistry
 from localmind.model import ChatModel
 
+from localmind.tool_parser import parse_tool_calls, strip_tool_calls
+from localmind.prompts import build_system_prompt
 
-SYSTEM_PROMPT = """You are LocalMind, a small local agent.
-
-Answer style:
-- Be clear, practical, and concise.
-- Prefer plain language over jargon.
-- For technical questions, explain the core idea first, then add one useful example when it helps.
-- If a term has multiple likely meanings, briefly mention the relevant meanings instead of guessing only one.
-- If you are unsure, say what you know and what would need checking.
-
-Tool use:
-- Use tools when they improve accuracy or complete the user's request.
-- Treat tool results as the source of truth for that step.
-- When a tool result is enough, answer directly and do not over-explain.
-
-Time awareness:
-- You do not know the real current date or time from memory.
-- For questions involving today, now, current date or time, tomorrow, yesterday, deadlines, schedules, elapsed time, or time-sensitive facts, call the current_time tool first.
-- Use the current_time result as the source of truth for date and time reasoning.
-
-Web search:
-- If web_search is available, use it for current, latest, recent, news, prices, changing APIs, laws, schedules, or facts likely to have changed.
-- Do not use web_search for stable general knowledge unless the user asks you to verify or cite sources.
-- When using web_search, cite source URLs from the tool result in your final answer.
-- Do not invent release dates, prices, version numbers, or availability details. State them only when they appear in the tool result.
-- For "latest" product/game/software questions, prefer official publisher, platform, or project sources over wiki or forum results.
-- If the user asks for a release date and the first search result does not include one, run one targeted follow-up search that includes the item name and "release date official".
-- If search results disagree or do not include the requested date, say what the sources show and note the uncertainty instead of guessing.
-"""
+from localmind.response_cleanup import (
+    decode_literal_unicode_escapes,
+    looks_like_generic_refusal,
+    normalize_requested_paragraphs,
+    strip_thinking,
+)
+from localmind.routing import (
+    response_format_instruction,
+    search_query,
+    search_result_limit,
+    select_tool_schemas,
+    should_presearch,
+)
+from localmind.search_context import (
+    append_search_sources,
+    clean_leaked_tool_answer,
+    format_tool_message,
+    limit_tool_result,
+    looks_like_search_instruction_echo,
+    looks_like_source_dump,
+    looks_like_tool_message_leak,
+    prepare_search_result,
+    strip_search_prompt_transcript,
+)
 
 
 class LocalMindAgent:
@@ -47,6 +44,8 @@ class LocalMindAgent:
         model: ChatModel,
         tools: ToolRegistry | None = None,
         max_tool_rounds: int = 4,
+        max_message_characters: int = 60_000,
+        max_tool_result_characters: int = 20_000,
     ) -> None:
         self.config = config
         self.model = model
@@ -56,45 +55,134 @@ class LocalMindAgent:
             searxng_url=config.searxng_url,
         )
         self.max_tool_rounds = max_tool_rounds
+        system_prompt = build_system_prompt(config)
+        self.max_message_characters = max(
+            max_message_characters, len(system_prompt) + 1
+        )
+        self.max_tool_result_characters = max(2, max_tool_result_characters)
         self.messages: list[dict[str, str]] = [
-            {"role": "system", "content": self._system_prompt()},
+            {"role": "system", "content": system_prompt},
         ]
 
     def ask(self, prompt: str) -> str:
+        history_before_turn = list(self.messages)
         self.messages.append({"role": "user", "content": prompt})
+        turn_tools = select_tool_schemas(prompt, self.tools.schemas)
+        format_instruction = response_format_instruction(prompt)
+        allowed_tool_names = {
+            str(schema.get("name")) for schema in turn_tools if schema.get("name")
+        }
         executed_calls: set[str] = set()
         last_tool_result: dict[str, Any] | None = None
+        search_sources: list[dict[str, Any]] = []
+        search_source_numbers: dict[str, int] = {}
+
+        if should_presearch(prompt, search_available=self._has_tool("web_search")):
+            arguments = {
+                "query": search_query(prompt),
+                "max_results": search_result_limit(prompt),
+            }
+            result = self.tools.execute("web_search", arguments)
+            if self._is_search_error(result):
+                return self._finish_turn(
+                    history_before_turn, result, discard_search_turn=True
+                )
+            result = prepare_search_result(
+                result,
+                search_sources,
+                search_source_numbers,
+                self.max_tool_result_characters,
+            )
+            last_tool_result = {
+                "name": "web_search",
+                "arguments": arguments,
+                "result": result,
+            }
+            executed_calls.add(self._tool_call_key("web_search", arguments))
+            self.messages.append(
+                {
+                    "role": "tool",
+                    "content": format_tool_message(
+                        last_tool_result, format_instruction
+                    ),
+                }
+            )
 
         for _ in range(self.max_tool_rounds):
+            self._compact_messages()
             response = self.model.generate(
                 self.messages,
-                self.tools.schemas,
+                turn_tools,
                 self.config.enable_thinking,
             )
             tool_calls = parse_tool_calls(response)
             if not tool_calls:
-                clean_response = strip_tool_calls(response)
-                self.messages.append({"role": "assistant", "content": clean_response})
-                return clean_response
+                clean_response = self._clean_generated_answer(response, last_tool_result)
+                if not clean_response:
+                    clean_response = self._retry_empty_response(
+                        response, last_tool_result, turn_tools
+                    ) or self._empty_response_fallback(last_tool_result)
+                if self.config.direct_mode and looks_like_generic_refusal(clean_response):
+                    direct_response = self._retry_direct_refusal(
+                        clean_response, last_tool_result, turn_tools
+                    )
+                    if direct_response is not None:
+                        clean_response = direct_response
+                if search_sources and self._is_malformed_search_answer(clean_response):
+                    revised_response = self._revise_malformed_search_answer(
+                        clean_response,
+                        last_tool_result,
+                        turn_tools,
+                        format_instruction,
+                    )
+                    clean_response = revised_response or (
+                        "I found web results, but the model could not produce a reliable "
+                        "synthesized answer from them."
+                    )
+                if looks_like_tool_message_leak(clean_response):
+                    clean_response = clean_leaked_tool_answer(last_tool_result)
+                clean_response = normalize_requested_paragraphs(
+                    clean_response, prompt
+                )
+                final_response = append_search_sources(clean_response, search_sources)
+                return self._finish_turn(
+                    history_before_turn,
+                    final_response,
+                    discard_search_turn=bool(search_sources),
+                )
 
             self.messages.append({"role": "assistant", "content": response})
             for call in tool_calls:
-                call_key = json.dumps(
-                    {"name": call.name, "arguments": call.arguments},
-                    sort_keys=True,
-                    ensure_ascii=True,
-                )
+                call_key = self._tool_call_key(call.name, call.arguments)
                 if call_key in executed_calls:
-                    fallback = self._answer_from_tool_result(last_tool_result)
-                    self.messages.append({"role": "assistant", "content": fallback})
-                    return fallback
+                    return self._finish_turn(
+                        history_before_turn,
+                        self._answer_from_tool_result(last_tool_result),
+                        discard_search_turn=bool(search_sources),
+                    )
                 executed_calls.add(call_key)
-                result = self.tools.execute(call.name, call.arguments)
-                if call.name == "web_search" and (
-                    result.startswith("Search error:") or result == "No search results found."
-                ):
-                    self.messages.append({"role": "assistant", "content": result})
-                    return result
+                if call.name not in allowed_tool_names:
+                    result = (
+                        f"Tool error: {call.name} is not enabled for this request. "
+                        "Do not call it; answer using the available information."
+                    )
+                else:
+                    result = self.tools.execute(call.name, call.arguments)
+                if call.name == "web_search" and self._is_search_error(result):
+                    return self._finish_turn(
+                        history_before_turn, result, discard_search_turn=True
+                    )
+                if call.name == "web_search":
+                    result = prepare_search_result(
+                        result,
+                        search_sources,
+                        search_source_numbers,
+                        self.max_tool_result_characters,
+                    )
+                else:
+                    result = limit_tool_result(
+                        result, self.max_tool_result_characters
+                    )
                 last_tool_result = {
                     "name": call.name,
                     "arguments": call.arguments,
@@ -103,31 +191,150 @@ class LocalMindAgent:
                 self.messages.append(
                     {
                         "role": "tool",
-                        "content": self._format_tool_message(last_tool_result),
+                        "content": format_tool_message(
+                            last_tool_result, format_instruction
+                        ),
                     }
                 )
 
-        fallback = self._answer_from_tool_result(last_tool_result)
-        self.messages.append({"role": "assistant", "content": fallback})
-        return fallback
-
-    def _system_prompt(self) -> str:
-        mode = "/think" if self.config.enable_thinking else "/no_think"
-        return f"{SYSTEM_PROMPT}\n{mode}"
-
-    def _format_tool_message(self, payload: dict[str, Any]) -> str:
-        instruction = (
-            "Tool result. Use this result to answer the user now. "
-            "Do not call the same tool with the same arguments again unless the result is an error."
+        return self._finish_turn(
+            history_before_turn,
+            self._answer_from_tool_result(last_tool_result),
+            discard_search_turn=bool(search_sources),
         )
-        return f"{instruction}\n{json.dumps(payload, ensure_ascii=True)}"
 
-    def _answer_from_tool_result(self, payload: dict[str, Any] | None) -> str:
+    def reset(self) -> None:
+        self.messages = [
+            {"role": "system", "content": build_system_prompt(self.config)}
+        ]
+
+    def _finish_turn(
+        self,
+        history_before_turn: list[dict[str, str]],
+        answer: str,
+        *,
+        discard_search_turn: bool = False,
+    ) -> str:
+        if discard_search_turn or not self.config.memory_enabled:
+            self.messages = history_before_turn
+        else:
+            self.messages.append({"role": "assistant", "content": answer})
+        return answer
+
+    def _clean_generated_answer(
+        self, response: str, last_tool_result: dict[str, Any] | None
+    ) -> str:
+        answer = strip_tool_calls(response)
+        answer = strip_thinking(answer)
+        answer = decode_literal_unicode_escapes(answer)
+        if last_tool_result is not None and last_tool_result.get("name") == "web_search":
+            answer = strip_search_prompt_transcript(answer)
+        return answer
+
+    def _retry_empty_response(
+        self,
+        empty_response: str,
+        last_tool_result: dict[str, Any] | None,
+        tool_schemas: list[dict[str, Any]],
+    ) -> str | None:
+        retry_messages = [
+            *self.messages,
+            {"role": "assistant", "content": empty_response},
+            {
+                "role": "user",
+                "content": (
+                    "Your previous response contained no final answer. Answer my latest request "
+                    "now. Return only the final answer, without thinking text, tool calls, tool "
+                    "instructions, JSON, or a source list."
+                ),
+            },
+        ]
+        retried = self.model.generate(retry_messages, tool_schemas, False)
+        if parse_tool_calls(retried):
+            return None
+        cleaned = self._clean_generated_answer(retried, last_tool_result)
+        if not cleaned or looks_like_tool_message_leak(cleaned):
+            return None
+        return cleaned
+
+    def _retry_direct_refusal(
+        self,
+        refusal: str,
+        last_tool_result: dict[str, Any] | None,
+        tool_schemas: list[dict[str, Any]],
+    ) -> str | None:
+        retry_messages = [
+            *self.messages,
+            {"role": "assistant", "content": refusal},
+            {
+                "role": "user",
+                "content": (
+                    "Answer my latest request directly and factually. Do not repeat a generic "
+                    "refusal, moral lecture, or unrelated warning. If one narrow part cannot be "
+                    "answered, state that briefly and still answer the useful parts. Return only "
+                    "the answer."
+                ),
+            },
+        ]
+        retried = self.model.generate(retry_messages, tool_schemas, False)
+        if parse_tool_calls(retried):
+            return None
+        cleaned = self._clean_generated_answer(retried, last_tool_result)
+        if (
+            not cleaned
+            or looks_like_generic_refusal(cleaned)
+            or looks_like_tool_message_leak(cleaned)
+        ):
+            return None
+        return cleaned
+
+    def _revise_malformed_search_answer(
+        self,
+        draft: str,
+        last_tool_result: dict[str, Any] | None,
+        tool_schemas: list[dict[str, Any]],
+        format_instruction: str | None,
+    ) -> str | None:
+        instruction = (
+            "Rewrite the previous draft as a direct, self-contained answer to my original "
+            "question. Start with the actual answer. Synthesize the evidence by topic rather "
+            "than describing sources one by one. Discard copied tool instructions, tool JSON, "
+            "citation blocks, and material from previous answers that does not address the current "
+            "question. Do not use citation-led lines, snippet quotes, a Sources section, or raw "
+            "URLs. Do not include bracket citations; LocalMind appends the numbered sources. "
+            "Return only the revised answer."
+        )
+        if format_instruction:
+            instruction += f" Output format: {format_instruction}"
+        revised = self.model.generate(
+            [
+                *self.messages,
+                {"role": "assistant", "content": draft},
+                {"role": "user", "content": instruction},
+            ],
+            tool_schemas,
+            self.config.enable_thinking,
+        )
+        if parse_tool_calls(revised):
+            return None
+        cleaned = self._clean_generated_answer(revised, last_tool_result)
+        if not cleaned or self._is_malformed_search_answer(cleaned):
+            return None
+        return cleaned
+
+    def _empty_response_fallback(
+        self, last_tool_result: dict[str, Any] | None
+    ) -> str:
+        if last_tool_result is not None:
+            return clean_leaked_tool_answer(last_tool_result)
+        return "The model returned no final answer. Please try the request again."
+
+    @staticmethod
+    def _answer_from_tool_result(payload: dict[str, Any] | None) -> str:
         if payload is None:
             return "I reached the tool-use limit before I could finish."
-
         result = str(payload.get("result", ""))
-        if result.startswith("Search error:") or result == "No search results found.":
+        if LocalMindAgent._is_search_error(result):
             return result
         if payload.get("name") == "web_search":
             return (
@@ -139,21 +346,43 @@ class LocalMindAgent:
             f"the tool-use limit. Tool result:\n{result}"
         )
 
+    def _compact_messages(self) -> None:
+        system = self.messages[0]
+        remaining = self.max_message_characters - len(system["content"])
+        kept: list[dict[str, str]] = []
+        for message in reversed(self.messages[1:]):
+            content = message["content"]
+            if len(content) <= remaining:
+                kept.append(message)
+                remaining -= len(content)
+                continue
+            if remaining > 0:
+                marker = "[Earlier content truncated]\n"
+                tail_length = max(0, remaining - len(marker))
+                tail = content[-tail_length:] if tail_length else ""
+                kept.append({"role": message["role"], "content": marker + tail})
+            break
+        self.messages = [system, *reversed(kept)]
 
-class StaticChatModel:
-    def __init__(self, responses: list[str]) -> None:
-        self.responses = responses
-        self.calls: list[dict[str, Any]] = []
+    def _has_tool(self, name: str) -> bool:
+        return any(schema.get("name") == name for schema in self.tools.schemas)
 
-    def generate(
-        self,
-        messages: list[dict[str, str]],
-        tools: list[dict[str, Any]],
-        enable_thinking: bool,
-    ) -> str:
-        self.calls.append(
-            {"messages": list(messages), "tools": list(tools), "enable_thinking": enable_thinking}
+    @staticmethod
+    def _is_search_error(result: str) -> bool:
+        return result.startswith("Search error:") or result == "No search results found."
+
+    @staticmethod
+    def _is_malformed_search_answer(answer: str) -> bool:
+        return (
+            looks_like_source_dump(answer)
+            or looks_like_tool_message_leak(answer)
+            or looks_like_search_instruction_echo(answer)
         )
-        if not self.responses:
-            return "No response configured."
-        return self.responses.pop(0)
+
+    @staticmethod
+    def _tool_call_key(name: str, arguments: dict[str, Any]) -> str:
+        return json.dumps(
+            {"name": name, "arguments": arguments},
+            sort_keys=True,
+            ensure_ascii=True,
+        )
