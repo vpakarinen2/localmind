@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 import json
+import re
 
 from dataclasses import dataclass
 from typing import Any
@@ -20,15 +21,24 @@ class SearxngSearch:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
-    def search(self, query: str, max_results: int = 5) -> str:
+    def search(self, query: str, max_results: int = 10) -> str:
         if not query.strip():
             return "Search error: query cannot be empty."
 
         limit = max(1, min(max_results, 10))
+        params = {"q": query, "format": "json"}
+        lowered_query = query.lower()
+        if re.search(r"\b(?:news|headlines?)\b", lowered_query):
+            params["categories"] = "news"
+            if re.search(
+                r"\b(?:latest|recent|current|today|breaking|updates?)\b",
+                lowered_query,
+            ):
+                params["time_range"] = "month"
         try:
             response = httpx.get(
                 f"{self.base_url}/search",
-                params={"q": query, "format": "json"},
+                params=params,
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()
