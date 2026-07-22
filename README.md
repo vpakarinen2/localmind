@@ -63,6 +63,20 @@ You can optionally change it with `--workspace`:
 uv run localmind chat --workspace .\workspace\my-session
 ```
 
+### Keywords
+
+#### Response Keywords
+
+```
+Numbered list: numbered list
+Bullet list: bullet list
+Recent News: latest, news, or updates
+Paragraph: one paragraph or single paragraph
+Multiple paragraphs: 3 paragraphs
+Top Result: top 5, top five
+Markdown: Markdown
+```
+
 ## Web Search
 
 LocalMind uses web search through SearXNG:
