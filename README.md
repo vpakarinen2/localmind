@@ -53,7 +53,7 @@ Use CUDA when available:
 uv run localmind chat --workspace ./workspace --device cuda
 ```
 
-## Workspace
+### Workspace
 
 Workspace is a local working directory that defaults to `./workspace`. 
 
@@ -79,7 +79,7 @@ From the project root, start SearXNG:
 docker run --rm -d --name localmind-searxng -p 8080:8080 --mount type=bind,source="%cd%\searxng",target=/etc/searxng -e BASE_URL=http://localhost:8080/ searxng/searxng:latest
 ```
 
-## SearXNG Settings
+### SearXNG Settings
 
 ```
 use_default_settings: true
