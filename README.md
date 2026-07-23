@@ -11,7 +11,6 @@ A small local CLI agent built around [`HuggingFaceTB/SmolLM3-3B`](https://huggin
 - Optional web search through self-hosted SearXNG
 - Session-only memory; no chat history is persisted
 - Custom system prompts (direct, programming)
-- Chat and Alpaca prompt formatting
 
 ## Requirements
 
