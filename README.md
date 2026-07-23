@@ -39,6 +39,7 @@ U.S. Senator Lindsey Graham, a close ally of President Donald Trump, has died at
 
 ```powershell
 uv sync
+uv add "peft>=0.17.0"
 ```
 
 ## Usage
