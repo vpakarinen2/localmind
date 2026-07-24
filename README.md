@@ -67,8 +67,6 @@ uv run localmind chat --workspace .\workspace\my-session
 
 ### Keywords
 
-#### Response Keywords
-
 ```
 Numbered list: numbered list
 Bullet list: bullet list
