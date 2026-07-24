@@ -45,13 +45,13 @@ uv add "peft>=0.17.0"
 Start chat session:
 
 ```powershell
-uv run localmind chat --workspace ./workspace
+uv run localmind chat --workspace ./workspace --device cuda
 ```
 
-Use CUDA when available:
+God mode:
 
 ```powershell
-uv run localmind chat --workspace ./workspace --device cuda
+uv run localmind chat --lora-model "vpakarinen/smollm3-3b-uncensored-thinking" --direct --prompt-format alpaca --workspace ./workspace
 ```
 
 ### Workspace
