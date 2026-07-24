@@ -56,10 +56,6 @@ uv run localmind chat --workspace ./workspace --device cuda
 
 ### Workspace
 
-Workspace is a local working directory that defaults to `./workspace`. 
-
-You can optionally change it with `--workspace`:
-
 ```
 uv run localmind chat --workspace .\workspace\my-session
 ```
@@ -67,13 +63,13 @@ uv run localmind chat --workspace .\workspace\my-session
 ### Keywords
 
 ```
-Numbered list: numbered list
-Bullet list: bullet list
-Recent News: latest, news, or updates
-Paragraph: single paragraph
-Multiple paragraphs: 3 paragraphs
-Top Result: top 5, top five
-Markdown: markdown
+numbered list
+bullet list
+latest, updates
+single paragraph
+3 paragraphs
+top 5, top 10
+markdown
 ```
 
 ## Web Search
