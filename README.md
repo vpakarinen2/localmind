@@ -1,6 +1,6 @@
 # LocalMind
 
-A small local CLI agent built around [`HuggingFaceTB/SmolLM3-3B`](https://huggingface.co/HuggingFaceTB/SmolLM3-3B).
+A local intelligent CLI agent built around [`HuggingFaceTB/SmolLM3-3B`](https://huggingface.co/HuggingFaceTB/SmolLM3-3B).
 
 ## Features
 
