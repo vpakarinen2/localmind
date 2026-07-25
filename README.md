@@ -13,8 +13,8 @@ A local intelligent CLI agent built around [`HuggingFaceTB/SmolLM3-3B`](https://
 
 ## Requirements
 
-- NVIDIA GPU with CUDA-enabled PyTorch (Optional)
 - Docker if you want to run SearXNG locally (Optional)
+- NVIDIA GPU with CUDA-enabled PyTorch (Optional)
 - Python 3.12 is recommended
 - [`uv`](https://docs.astral.sh/uv/)
 
@@ -63,13 +63,26 @@ uv run localmind chat --workspace .\workspace\my-session
 ### Keywords
 
 ```
-numbered list
-bullet list
-latest, updates
 single paragraph
 3 paragraphs
+numbered list
+bullet list
 top 5, top 10
+latest, updates
 markdown
+```
+
+### Flags
+
+```
+--model MODEL
+--lora-model ADAPTER
+--prompt-format
+--thinking
+--device
+--search
+--searxng-url URL
+--max-new-tokens N
 ```
 
 ## Web Search
