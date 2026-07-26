@@ -77,9 +77,10 @@ markdown
 ```
 --model MODEL
 --lora-model ADAPTER
+--device DEVICE
+--workspace PATH
 --prompt-format
 --thinking
---device
 --search
 --searxng-url URL
 --max-new-tokens N
