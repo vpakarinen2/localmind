@@ -48,10 +48,16 @@ Start chat session:
 uv run localmind chat --workspace ./workspace --device cuda
 ```
 
+Thinking:
+
+```powershell
+uv run localmind chat --workspace ./workspace --device cuda --thinking
+```
+
 God mode:
 
 ```powershell
-uv run localmind chat --lora-model "vpakarinen/smollm3-3b-uncensored-thinking" --direct --workspace ./workspace
+uv run localmind chat --lora-model "vpakarinen/smollm3-3b-uncensored-thinking" --workspace ./workspace --thinking
 ```
 
 ### Workspace
