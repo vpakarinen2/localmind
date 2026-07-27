@@ -66,18 +66,6 @@ uv run localmind chat --lora-model "vpakarinen/smollm3-3b-uncensored-thinking" -
 uv run localmind chat --workspace .\workspace\my-session
 ```
 
-### Keywords
-
-```
-single paragraph
-3 paragraphs
-numbered list
-bullet list
-top 5, top 10
-latest, updates
-markdown
-```
-
 ### Flags
 
 ```
