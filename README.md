@@ -51,7 +51,7 @@ uv run localmind chat --workspace ./workspace --device cuda
 God mode:
 
 ```powershell
-uv run localmind chat --lora-model "vpakarinen/smollm3-3b-uncensored-thinking" --direct --prompt-format alpaca --workspace ./workspace
+uv run localmind chat --lora-model "vpakarinen/smollm3-3b-uncensored-thinking" --direct --workspace ./workspace
 ```
 
 ### Workspace
