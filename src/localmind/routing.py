@@ -115,7 +115,7 @@ def search_query(prompt: str) -> str:
     query = re.sub(r"\bsearch\s+the\s+web\b", "", query, flags=re.IGNORECASE)
     query = re.sub(r"\blook\s+it\s+up\b", "", query, flags=re.IGNORECASE)
     query = re.sub(r"\bsearch\s+online\b", "", query, flags=re.IGNORECASE)
-    query = re.sub(TOP_COUNT_PATTERN, "", query, flags=re.IGNORECASE)
+    query = re.sub(TOP_COUNT_PATTERN, "top", query, flags=re.IGNORECASE)
     query = re.sub(SOURCE_COUNT_PATTERN, "", query, flags=re.IGNORECASE)
     format_patterns = (
         r"\b(?:(?:as|in|using|with)\s+)?(?:a\s+)?(?:bullet(?:ed)?(?: point)? list|bullet points?|bullets)\b",
@@ -127,14 +127,14 @@ def search_query(prompt: str) -> str:
     for pattern in format_patterns:
         query = re.sub(pattern, "", query, flags=re.IGNORECASE)
     query = re.sub(
-        r"\b(?:give|show|return|present|format|use)(?:\s+me)?(?:\s+the)?(?=\s*[.,!?;:]|$)",
+        r"\b(?:give|show|return|present|format)(?:\s+me)?(?:\s+the)?(?=\s*[.,!?;:]|$)",
         "",
         query,
         flags=re.IGNORECASE,
     )
     trailing_command = (
-        r"(?:^|[.!?;:]\s*)\b(?:give|show|return|present|format|use)"
-        r"(?:\s+me)?(?:\s+the)?\s*[.,!?;:]*\s*$"
+        r"(?:^|[.!?;:]\s*)\b(?:answer|give|show|return|present|format)"
+        r"(?:\s+me)?(?:\s+the)?(?:\s*[.,!?;:])*\s*$"
     )
     previous_query = None
     while query != previous_query:
@@ -165,6 +165,26 @@ def requested_source_count(prompt: str) -> int | None:
     return max(1, min(count, 10))
 
 
+def requested_list_count(prompt: str) -> int | None:
+    """Return an explicit small item count when the user requests a list."""
+    lowered = prompt.lower()
+    if not re.search(
+        r"\b(?:numbered list|numbered points?|numbered format|"
+        r"bullet(?:ed)?(?: point)? list|bullet points?|bullets)\b",
+        lowered,
+    ):
+        return None
+    match = re.search(
+        r"\b(10|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(?!paragraphs?\b|(?:web\s+)?sources?\b)[a-z][a-z0-9_-]*",
+        lowered,
+    )
+    if match is None:
+        return None
+    raw_count = match.group(1)
+    return int(raw_count) if raw_count.isdigit() else NUMBER_WORDS[raw_count]
+
+
 def search_result_limit(prompt: str) -> int:
     return requested_source_count(prompt) or 10
 
@@ -172,6 +192,7 @@ def search_result_limit(prompt: str) -> int:
 def response_format_instruction(prompt: str) -> str | None:
     lowered = prompt.lower()
     top_count = requested_top_count(prompt)
+    list_count = requested_list_count(prompt)
     instruction: str | None = None
     if top_count is not None:
         instruction = (
@@ -179,9 +200,25 @@ def response_format_instruction(prompt: str) -> str | None:
             "Do not invent items to reach the requested count."
         )
     elif re.search(r"\b(?:numbered list|numbered points?|numbered format)\b", lowered):
-        instruction = "Return a concise numbered list of concrete supported items."
+        if list_count is not None:
+            instruction = (
+                f"Return a numbered list with up to {list_count} unique concrete "
+                "supported items. Do not repeat an item under different wording or "
+                "invent items to reach the requested count."
+            )
+        else:
+            instruction = "Return a concise numbered list of unique concrete supported items."
     elif re.search(r"\b(?:bullet(?:ed)?(?: point)? list|bullet points?|bullets)\b", lowered):
-        instruction = "Return a concise bullet-point list of concrete supported items."
+        if list_count is not None:
+            instruction = (
+                f"Return a bullet-point list with up to {list_count} unique concrete "
+                "supported items. Do not repeat an item under different wording or "
+                "invent items to reach the requested count."
+            )
+        else:
+            instruction = (
+                "Return a concise bullet-point list of unique concrete supported items."
+            )
     elif paragraph_match := re.search(r"\b(\d{1,2})\s+paragraphs?\b", lowered):
         count = max(1, min(int(paragraph_match.group(1)), 10))
         instruction = (
@@ -192,10 +229,10 @@ def response_format_instruction(prompt: str) -> str | None:
         instruction = (
             "Return one concise paragraph in normal prose. Do not format it as a list."
         )
-    elif re.search(r"\b(?:latest|recent|news|headlines|updates?)\b", lowered):
+    else:
         instruction = (
-            "Return a numbered list of up to 5 concrete recent developments, including "
-            "dates when the evidence provides them."
+            "Return exactly 2 concise prose paragraphs separated by a blank line. "
+            "Do not number, bullet, label, or add headings to the paragraphs."
         )
     if re.search(r"\bmarkdown\b", lowered):
         markdown = "Use clear Markdown syntax."

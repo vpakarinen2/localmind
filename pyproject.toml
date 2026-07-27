@@ -1,12 +1,13 @@
 [project]
 name = "localmind"
-version = "0.1.0"
+version = "2.0.0"
 description = "A small local agent for everyday reasoning."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "accelerate>=1.0.0",
+    "peft>=0.17.0",
     "pydantic>=2.8.0",
     "rich>=13.7.0",
     "safetensors>=0.4.5",

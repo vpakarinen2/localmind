@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from typing import Any, Protocol
 
 from localmind.config import DeviceMode, PromptFormat
@@ -80,7 +82,7 @@ class TransformersChatModel:
             )
         max_input_tokens = max(1, context_window - generation_limit)
         if self.prompt_format == "alpaca":
-            prompt = self._format_alpaca_prompt(messages)
+            prompt = self._format_alpaca_prompt(messages, tools)
             inputs = self._tokenizer(
                 prompt,
                 return_tensors="pt",
@@ -130,8 +132,18 @@ class TransformersChatModel:
         ).strip()
 
     @staticmethod
-    def _format_alpaca_prompt(messages: list[dict[str, str]]) -> str:
-        conversation = [message for message in messages if message.get("role") != "system"]
+    def _format_alpaca_prompt(
+        messages: list[dict[str, str]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        system_messages = [
+            message.get("content", "").strip()
+            for message in messages
+            if message.get("role") == "system" and message.get("content", "").strip()
+        ]
+        conversation = [
+            message for message in messages if message.get("role") != "system"
+        ]
         latest_user_index = next(
             (
                 index
@@ -147,18 +159,35 @@ class TransformersChatModel:
         context_messages = [
             message for index, message in enumerate(conversation) if index != latest_user_index
         ]
-        if not context_messages:
+        context_sections: list[str] = []
+        if system_messages:
+            context_sections.append(
+                "System guidance:\n" + "\n\n".join(system_messages)
+            )
+        if tools:
+            encoded_tools = json.dumps(tools, ensure_ascii=False)
+            context_sections.append(
+                "Available tools:\n"
+                f"{encoded_tools}\n"
+                "When a tool is needed, return only "
+                '<tool_call>{"name":"tool_name","arguments":{...}}</tool_call>.'
+            )
+        if context_messages:
+            role_names = {"user": "User", "assistant": "Assistant", "tool": "Tool"}
+            context = "\n\n".join(
+                f"{role_names.get(message.get('role', ''), message.get('role', 'Context').title())}: "
+                f"{message.get('content', '').strip()}"
+                for message in context_messages
+            )
+            context_sections.append("Conversation context:\n" + context)
+
+        if not context_sections:
             return (
                 f"{ALPACA_SYSTEM_NO_INPUT}\n\n"
                 f"### Instruction:\n{instruction}\n\n### Response:\n"
             )
 
-        role_names = {"user": "User", "assistant": "Assistant", "tool": "Tool"}
-        context = "\n\n".join(
-            f"{role_names.get(message.get('role', ''), message.get('role', 'Context').title())}: "
-            f"{message.get('content', '').strip()}"
-            for message in context_messages
-        )
+        context = "\n\n".join(context_sections)
         return (
             f"{ALPACA_SYSTEM_WITH_INPUT}\n\n"
             f"### Instruction:\n{instruction}\n\n"

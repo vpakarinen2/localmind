@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from typing import Any
 
@@ -12,9 +13,11 @@ from localmind.tool_parser import parse_tool_calls, strip_tool_calls
 from localmind.prompts import build_system_prompt
 
 from localmind.response_cleanup import (
+    deduplicate_list_entries,
     decode_literal_unicode_escapes,
     looks_like_generic_refusal,
     normalize_requested_paragraphs,
+    strip_response_wrappers,
     strip_thinking,
 )
 from localmind.routing import (
@@ -34,6 +37,7 @@ from localmind.search_context import (
     looks_like_tool_message_leak,
     prepare_search_result,
     strip_search_prompt_transcript,
+    unsupported_named_list_items,
 )
 
 
@@ -128,6 +132,23 @@ class LocalMindAgent:
                     )
                     if direct_response is not None:
                         clean_response = direct_response
+                if (
+                    search_sources
+                    and re.search(r"\b(?:top|best)\b", prompt, re.IGNORECASE)
+                    and self._unsupported_search_list_items(
+                        clean_response, last_tool_result
+                    )
+                ):
+                    revised_response = self._revise_ungrounded_search_answer(
+                        clean_response,
+                        last_tool_result,
+                        turn_tools,
+                        format_instruction,
+                    )
+                    clean_response = revised_response or (
+                        "The web results did not contain enough explicit evidence to name "
+                        "the requested items reliably."
+                    )
                 if search_sources and self._is_malformed_search_answer(clean_response):
                     revised_response = self._revise_malformed_search_answer(
                         clean_response,
@@ -151,7 +172,18 @@ class LocalMindAgent:
                     discard_search_turn=bool(search_sources),
                 )
 
-            self.messages.append({"role": "assistant", "content": response})
+            assistant_tool_calls = "\n".join(
+                "<tool_call>"
+                + json.dumps(
+                    {"name": call.name, "arguments": call.arguments},
+                    ensure_ascii=False,
+                )
+                + "</tool_call>"
+                for call in tool_calls
+            )
+            self.messages.append(
+                {"role": "assistant", "content": assistant_tool_calls}
+            )
             for call in tool_calls:
                 call_key = self._tool_call_key(call.name, call.arguments)
                 if call_key in executed_calls:
@@ -225,8 +257,13 @@ class LocalMindAgent:
         self, response: str, last_tool_result: dict[str, Any] | None
     ) -> str:
         answer = strip_tool_calls(response)
-        answer = strip_thinking(answer)
+        answer = strip_thinking(
+            answer,
+            assume_leading_thinking=self.config.enable_thinking,
+        )
         answer = decode_literal_unicode_escapes(answer)
+        answer = strip_response_wrappers(answer)
+        answer = deduplicate_list_entries(answer)
         if last_tool_result is not None and last_tool_result.get("name") == "web_search":
             answer = strip_search_prompt_transcript(answer)
         return answer
@@ -249,7 +286,11 @@ class LocalMindAgent:
                 ),
             },
         ]
-        retried = self.model.generate(retry_messages, tool_schemas, False)
+        retried = self.model.generate(
+            retry_messages,
+            tool_schemas,
+            False,
+        )
         if parse_tool_calls(retried):
             return None
         cleaned = self._clean_generated_answer(retried, last_tool_result)
@@ -276,7 +317,11 @@ class LocalMindAgent:
                 ),
             },
         ]
-        retried = self.model.generate(retry_messages, tool_schemas, False)
+        retried = self.model.generate(
+            retry_messages,
+            tool_schemas,
+            self.config.enable_thinking,
+        )
         if parse_tool_calls(retried):
             return None
         cleaned = self._clean_generated_answer(retried, last_tool_result)
@@ -321,6 +366,52 @@ class LocalMindAgent:
         if not cleaned or self._is_malformed_search_answer(cleaned):
             return None
         return cleaned
+
+    def _revise_ungrounded_search_answer(
+        self,
+        draft: str,
+        last_tool_result: dict[str, Any] | None,
+        tool_schemas: list[dict[str, Any]],
+        format_instruction: str | None,
+    ) -> str | None:
+        instruction = (
+            "Rewrite the previous draft using only names and facts explicitly present in the "
+            "web-search result titles or snippets. Do not rely on memory to complete product "
+            "names, create variants, or combine specifications. Omit every unsupported item "
+            "and return fewer items than requested if necessary. Return only the corrected "
+            "answer without citations, URLs, or a Sources section."
+        )
+        if format_instruction:
+            instruction += f" Output format: {format_instruction}"
+        revised = self.model.generate(
+            [
+                *self.messages,
+                {"role": "assistant", "content": draft},
+                {"role": "user", "content": instruction},
+            ],
+            tool_schemas,
+            self.config.enable_thinking,
+        )
+        if parse_tool_calls(revised):
+            return None
+        cleaned = self._clean_generated_answer(revised, last_tool_result)
+        if (
+            not cleaned
+            or self._is_malformed_search_answer(cleaned)
+            or self._unsupported_search_list_items(cleaned, last_tool_result)
+        ):
+            return None
+        return cleaned
+
+    @staticmethod
+    def _unsupported_search_list_items(
+        answer: str, last_tool_result: dict[str, Any] | None
+    ) -> list[str]:
+        if last_tool_result is None or last_tool_result.get("name") != "web_search":
+            return []
+        return unsupported_named_list_items(
+            answer, str(last_tool_result.get("result", ""))
+        )
 
     def _empty_response_fallback(
         self, last_tool_result: dict[str, Any] | None
