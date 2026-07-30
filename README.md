@@ -13,10 +13,10 @@ A small local CLI agent built around [`HuggingFaceTB/SmolLM3-3B`](https://huggin
 
 ## Requirements
 
-- Docker if you want to run SearXNG locally (Optional)
 - NVIDIA GPU with CUDA-enabled PyTorch (Optional)
+- Docker to run SearXNG locally (Optional)
 - Python 3.12 is recommended
-- [`uv`](https://docs.astral.sh/uv/)
+- [`uv`](https://docs.astral.sh/uv/) package
 
 ## Example
 
